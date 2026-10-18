@@ -56,6 +56,14 @@ static const uint8_t CMD_OPEN[]  = {0x00, 0x01, 0x43, 0x00, 0x00, 0x00, 0x00};
 static const uint8_t CMD_CLOSE[] = {0x00, 0x01, 0x43, 0xC8, 0x00, 0x00, 0x00};
 static const uint8_t CMD_STOP[]  = {0x00, 0x01, 0x43, 0xD2, 0x00, 0x20, 0xD2, 0x00, 0x00};
 
+// "Go to My/favourite" is a full 3-frame press: a stop (0x00) then two 0x20
+// frames carrying the My button code (02). Sent with consecutive counters.
+static const uint8_t MY_1[] = {0x00, 0x01, 0x43, 0xD2, 0x00, 0x20, 0xD2, 0x00, 0x00};
+static const uint8_t MY_2[] = {0x20, 0x02, 0xFF, 0x01, 0x43, 0x02, 0x0C, 0x00, 0x00};
+static const uint8_t MY_3[] = {0x20, 0x02, 0xFF, 0x01, 0x43, 0x02, 0x05, 0xFF, 0x00};
+struct FrameData {const uint8_t* data;size_t len;};
+static const FrameData MY_SEQ[] = {{MY_1, sizeof(MY_1)}, {MY_2, sizeof(MY_2)}, {MY_3, sizeof(MY_3)}};
+
 LORA32_RADIO radio = new Module(LORA32_SPI_CS, LORA32_RADIO_IO0, LORA32_RADIO_RST, LORA32_RADIO_IO1);
 WiFiClient    wifiClient;
 PubSubClient  mqtt(wifiClient);
@@ -200,29 +208,38 @@ static uint16_t counterGet(const Blind& bl) {
 static void counterSet(const Blind& bl, uint16_t v) {prefs.putUShort(nvsKey(bl).c_str(), v);}
 
 // =================== radio TX ===================
-static void sendCommand(Blind& bl, const uint8_t* data, size_t dataLen) {
-  uint16_t c = counterGet(bl) + 1; // one past our last
-  uint8_t counter[2] = {(uint8_t)(c >> 8), (uint8_t)(c & 0xff)};
+// Transmit a sequence of frames with consecutive counters (base+1, base+2, ...),
+// each repeated like the real remote (first copy with control byte 1 = 0x20).
+static void sendFrames(Blind& bl, const FrameData* seq, size_t nframes) {
+  uint16_t base = counterGet(bl);
   uint8_t frame[40], air[52];
-
-  size_t flen = buildFrame(bl, data, dataLen, 0x00, counter, frame);
-  size_t alen = uartEncode(frame, flen, air, sizeof(air));
 
   radio.clearPacketReceivedAction(); // leave RX cleanly before transmitting
   radio.standby();
-  radio.fixedPacketLengthMode(alen);
 
   int16_t st = 0;
-  for(int rep = 0; rep < 4; rep++) {
-    buildFrame(bl, data, dataLen, rep == 0 ? 0x20 : 0x00, counter, frame);
-    uartEncode(frame, flen, air, sizeof(air));
-    st = radio.transmit(air, alen);
-    delay(40);
+  for(size_t k = 0; k < nframes; k++) {
+    uint16_t c = base + 1 + k;
+    uint8_t counter[2] = {(uint8_t)(c >> 8), (uint8_t)(c & 0xff)};
+    size_t flen = buildFrame(bl, seq[k].data, seq[k].len, 0x00, counter, frame);
+    size_t alen = uartEncode(frame, flen, air, sizeof(air));
+    radio.fixedPacketLengthMode(alen);
+    for(int rep = 0; rep < 4; rep++) {
+      buildFrame(bl, seq[k].data, seq[k].len, rep == 0 ? 0x20 : 0x00, counter, frame);
+      uartEncode(frame, flen, air, sizeof(air));
+      st = radio.transmit(air, alen);
+      delay(40);
+    }
   }
-  counterSet(bl, c);
-  Serial.printf("[TX] %s counter=0x%04X len=%u state=%d\n", bl.name, c, (unsigned)dataLen, st);
+  counterSet(bl, base + nframes);
+  Serial.printf("[TX] %s base=0x%04X nframes=%u state=%d\n", bl.name, base + 1, (unsigned)nframes, st);
   rxFlag = false;  // ignore any self-triggered Rx event from the transmit
   enterReceive();  // back to listening (for passive counter tracking)
+}
+
+static void sendCommand(Blind& bl, const uint8_t* data, size_t dataLen) {
+  FrameData one = {data, dataLen};
+  sendFrames(bl, &one, 1);
 }
 
 // =================== MQTT topics + discovery ===================
@@ -310,7 +327,7 @@ static void onMessage(char* topic, byte* payload, unsigned int len) {
       else if(p == "STOP")  {sendCommand(bl, CMD_STOP, sizeof(CMD_STOP));}
       publishCounter(bl);
     } else if(t == base + "/my") {
-      sendCommand(bl, CMD_STOP, sizeof(CMD_STOP));
+      sendFrames(bl, MY_SEQ, sizeof(MY_SEQ) / sizeof(MY_SEQ[0]));
       publishCounter(bl);
     } else if(t == base + "/counter/set") {
       counterSet(bl, (uint16_t)p.toInt());
