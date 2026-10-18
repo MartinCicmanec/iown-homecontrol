@@ -282,7 +282,7 @@ static void publishDiscovery(const Blind& bl) {
     JsonDocument d;
     d["name"] = String(bl.name) + " My";
     d["unique_id"] = uid + "_my";
-    d["command_topic"] = baseTopic(bl) + "/my";
+    d["command_topic"] = baseTopic(bl) + "/set";
     d["payload_press"] = "MY";
     d["device"] = dev;
     String out;serializeJson(d, out);
@@ -325,9 +325,7 @@ static void onMessage(char* topic, byte* payload, unsigned int len) {
       if(p == "OPEN")       {sendCommand(bl, CMD_OPEN, sizeof(CMD_OPEN));publishState(bl, "open");}
       else if(p == "CLOSE") {sendCommand(bl, CMD_CLOSE, sizeof(CMD_CLOSE));publishState(bl, "closed");}
       else if(p == "STOP")  {sendCommand(bl, CMD_STOP, sizeof(CMD_STOP));}
-      publishCounter(bl);
-    } else if(t == base + "/my") {
-      sendFrames(bl, MY_SEQ, sizeof(MY_SEQ) / sizeof(MY_SEQ[0]));
+      else if(p == "MY")    {sendFrames(bl, MY_SEQ, sizeof(MY_SEQ) / sizeof(MY_SEQ[0]));}
       publishCounter(bl);
     } else if(t == base + "/counter/set") {
       counterSet(bl, (uint16_t)p.toInt());
@@ -345,7 +343,6 @@ static void mqttConnect() {
       for(size_t i = 0; i < NBLINDS; i++) {
         Blind& bl = BLINDS[i];
         mqtt.subscribe((baseTopic(bl) + "/set").c_str());
-        mqtt.subscribe((baseTopic(bl) + "/my").c_str());
         mqtt.subscribe((baseTopic(bl) + "/counter/set").c_str());
         publishDiscovery(bl);
         publishCounter(bl);
