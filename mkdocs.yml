@@ -46,6 +46,8 @@ nav:
       - Commands: commands.md
       - Parameter: parameter/README.md
   - Parameter Viewer: parameter/database/README.md
+  - Guides:
+      - Home Assistant (MQTT): home-assistant-mqtt-guide.md
   - Reference:
       - Devices: devices.md
       - Connectivity Kit: devices/somfy/ConnectivityKit/README.md
