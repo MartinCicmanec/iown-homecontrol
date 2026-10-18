@@ -93,3 +93,4 @@ $RECYCLE.BIN/
 
 # iown-homecontrol: generated secret key header (never commit)
 include/iown_key.h
+include/iown_net.h
