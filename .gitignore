@@ -90,3 +90,6 @@ $RECYCLE.BIN/
 .idea/**/markdown-navigator.xml
 .idea/**/markdown-navigator-enh.xml
 .idea/**/markdown-navigator/
+
+# iown-homecontrol: generated secret key header (never commit)
+include/iown_key.h
